@@ -1,0 +1,6 @@
+# Default owner for everything
+*    @aiKC91
+
+# Owners for docs and Python files
+/docs/    @aiKC91
+*.py      @aiKC91
