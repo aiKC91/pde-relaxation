@@ -1,0 +1,12 @@
+name: pde-relaxation
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - scipy
+  - matplotlib
+  - pytest
+  - h5py
+  - netcdf4
+prefix: ./env

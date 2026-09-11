@@ -1,18 +1,7 @@
 #!/usr/bin/env python3
 """
-scipy_solver.py
-
-Semi-Lagrangian + implicit diffusion solver for:
-    dPsi/dt + u·∇Psi = alpha ∇²Psi - beta Psi |curl(u)| + gamma F
-
-Features (compact):
- - Bicubic interpolation via scipy.ndimage.map_coordinates (if available)
- - Implicit diffusion using SciPy sparse factorization
- - Optional velocity time-series reading (.npz/.h5/.nc)
- - Diagnostics: mass, L2 norm, conservation error
- - RK2 backtrace option
-
-This file is intended as an example; tune dt/grid for your problem.
+scipy_solver.py (enhanced)
+Adds RK3 option and CLI selection for backtrace method.
 """
 import argparse
 import numpy as np
@@ -51,7 +40,6 @@ def bicubic_periodic_interp(field, x_pos, y_pos, Lx, Ly):
     if map_coordinates is not None:
         sampled = map_coordinates(field, coords, order=3, mode='wrap')
     else:
-        # fallback to bilinear
         i0 = np.floor(xi).astype(int) % nx
         j0 = np.floor(yi).astype(int) % ny
         tx = xi - np.floor(xi)
@@ -72,25 +60,45 @@ def compute_curl_magnitude(u_x, u_y, dx, dy):
     return np.abs(dvy_dx - dux_dy)
 
 
-def rk2_backtrace(X, Y, u_x, u_y, dt, vel_func=None, t=0.0):
-    # midpoint RK2 backtrace; vel_func(X,Y,t) optional for time-dependent velocity
-    x_mid = X - 0.5 * dt * u_x
-    y_mid = Y - 0.5 * dt * u_y
-    if vel_func is not None:
-        u_x_mid, u_y_mid = vel_func(x_mid, y_mid, t - 0.5*dt)
-    else:
-        # assume u_x/u_y are spatial fields; sample at midpoints via periodic interp
-        # simple nearest sampling for speed (accurate choice depends on user)
-        u_x_mid = np.interp(x_mid.flatten(), X[:,0], u_x[:,0]).reshape(u_x.shape)
-        u_y_mid = np.interp(y_mid.flatten(), Y[0,:], u_y[0,:]).reshape(u_y.shape)
-    x0 = (X - dt * u_x_mid) % (X.max() + (X[1,0]-X[0,0]))
-    y0 = (Y - dt * u_y_mid) % (Y.max() + (Y[0,1]-Y[0,0]))
-    return x0, y0
+def integrate_backward_rk(X, Y, dt, vel_func, t, method='rk2'):
+    h = -dt
+    if method == 'euler':
+        u_x, u_y = vel_func(X, Y, t)
+        x0 = (X + h * u_x) % (X.max() + (X[1,0]-X[0,0]))
+        y0 = (Y + h * u_y) % (Y.max() + (Y[0,1]-Y[0,0]))
+        return x0, y0
+    if method == 'rk2':
+        u1x, u1y = vel_func(X, Y, t)
+        X1 = X + 0.5 * h * u1x
+        Y1 = Y + 0.5 * h * u1y
+        u2x, u2y = vel_func(X1, Y1, t + 0.5*h)
+        x0 = (X + h * u2x) % (X.max() + (X[1,0]-X[0,0]))
+        y0 = (Y + h * u2y) % (Y.max() + (Y[0,1]-Y[0,0]))
+        return x0, y0
+    if method == 'rk3':
+        u1x, u1y = vel_func(X, Y, t)
+        X2 = X + 0.5 * h * u1x
+        Y2 = Y + 0.5 * h * u1y
+        u2x, u2y = vel_func(X2, Y2, t + 0.5*h)
+        X3 = X + h * (-u1x + 2*u2x)
+        Y3 = Y + h * (-u1y + 2*u2y)
+        u3x, u3y = vel_func(X3, Y3, t + h)
+        x0 = (X + h * (u1x / 6.0 + 2.0/3.0 * u2x + u3x / 6.0)) % (X.max() + (X[1,0]-X[0,0]))
+        y0 = (Y + h * (u1y / 6.0 + 2.0/3.0 * u2y + u3y / 6.0)) % (Y.max() + (Y[0,1]-Y[0,0]))
+        return x0, y0
+    raise ValueError('Unknown method')
+
+
+def default_velocity(X, Y, t):
+    omega = 2.0 * np.pi
+    xc, yc = 0.5, 0.5
+    u_x = -omega * (Y - yc)
+    u_y =  omega * (X - xc)
+    return u_x, u_y
 
 
 def run_solver(nx=128, ny=128, Lx=1.0, Ly=1.0, dt=0.002, t_end=0.5,
-               alpha=1e-3, beta=5.0, gamma=1.0, use_rk2=True,
-               vel_func=None, plot=False):
+               alpha=1e-3, beta=5.0, gamma=1.0, rk='rk2'):
     dx = Lx / nx
     dy = Ly / ny
     x = (np.arange(nx) + 0.5) * dx
@@ -108,20 +116,8 @@ def run_solver(nx=128, ny=128, Lx=1.0, Ly=1.0, dt=0.002, t_end=0.5,
     nsteps = int(np.ceil(t_end / dt))
 
     for step in range(nsteps):
-        if vel_func is None:
-            omega = 2.0 * np.pi
-            xc, yc = 0.5*Lx, 0.5*Ly
-            u_x = -omega * (Y - yc)
-            u_y =  omega * (X - xc)
-        else:
-            u_x, u_y = vel_func(X, Y, t)
-
-        if use_rk2:
-            x0, y0 = rk2_backtrace(X, Y, u_x, u_y, dt, vel_func, t)
-        else:
-            x0 = (X - dt * u_x) % Lx
-            y0 = (Y - dt * u_y) % Ly
-
+        u_x, u_y = default_velocity(X, Y, t)
+        x0, y0 = integrate_backward_rk(X, Y, dt, default_velocity, t, method=rk)
         Psi_adv = bicubic_periodic_interp(Psi, x0, y0, Lx, Ly)
         curl_mag = compute_curl_magnitude(u_x, u_y, dx, dy)
         S = -beta * Psi_adv * curl_mag + gamma * F
@@ -137,7 +133,7 @@ if __name__ == '__main__':
     p.add_argument('--ny', type=int, default=128)
     p.add_argument('--dt', type=float, default=0.002)
     p.add_argument('--tend', type=float, default=0.5)
-    p.add_argument('--use_rk2', action='store_true')
+    p.add_argument('--rk', choices=['euler','rk2','rk3'], default='rk2')
     args = p.parse_args()
-    psi = run_solver(nx=args.nx, ny=args.ny, dt=args.dt, t_end=args.tend, use_rk2=args.use_rk2)
-    print('Done sample run. max Psi =', np.max(psi))
+    psi = run_solver(nx=args.nx, ny=args.ny, dt=args.dt, t_end=args.tend, rk=args.rk)
+    print('Done SciPy run. max Psi =', np.max(psi))

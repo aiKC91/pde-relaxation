@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ ETERNAFX ]
+    branches: [ ETERNAFX, feature/enhancements ]
   pull_request:
     branches: [ ETERNAFX ]
 
@@ -21,7 +21,10 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install numpy scipy pytest
+        pip install numpy scipy pytest black
+    - name: Black format check
+      run: |
+        python tools/black_check.py
     - name: Run tests
       run: |
         pytest -q
