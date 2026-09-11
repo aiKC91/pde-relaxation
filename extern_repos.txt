@@ -1,0 +1,8 @@
+# extern_repos.txt
+# List one external GitHub repository per line (owner/repo or full HTTPS git URL).
+# CI will only act on this file if it exists and is non-empty.
+# Prefer pinning to a commit SHA or tag for reproducible CI runs.
+
+# Examples (uncomment and replace with repos you want to integrate):
+# numpy/numpy
+# https://github.com/OWNER/OTHER-REPO.git@<commit-sha>

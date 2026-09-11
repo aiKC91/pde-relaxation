@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ ETERNAFX, feature/enhancements ]
+    branches: [ ETERNAFX, feature/enhancements, feature/integrations ]
   pull_request:
     branches: [ ETERNAFX ]
 
@@ -25,6 +25,10 @@ jobs:
     - name: Black format check
       run: |
         python tools/black_check.py
-    - name: Run tests
+    - name: Run unit tests
       run: |
         pytest -q
+    - name: Checkout external repositories (optional)
+      run: |
+        chmod +x tools/checkout_externals.sh
+        ./tools/checkout_externals.sh
